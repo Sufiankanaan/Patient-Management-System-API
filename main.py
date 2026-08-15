@@ -3,8 +3,23 @@ from pydantic import BaseModel ,Field,field_validator,model_validator,computed_f
 from typing import Optional,List,Annotated,Literal
 from fastapi.responses import JSONResponse
 import json
+import pickle
+import pandas as pd
 
 app=FastAPI()
+
+with open('model.pkl','rb') as f:
+    model= pickle.load(f)
+class UserInput(BaseModel):
+    age:Annotated[int,Field(...,gt=0,lt=130,description='age user')]
+    weight: Annotated[float, Field(..., gt=0, description='weight')]
+    height: Annotated[float, Field(..., gt=0, lt=2.5, description='height')]
+    income_lpa: Annotated[float, Field(..., gt=0, description=' Annual income')]
+    smoker: Annotated[bool, Field(..., description='smoker')]
+    city: Annotated[str, Field(..., description='city')]
+    occupation: Annotated[Literal['retired', 'freelancer', 'student', 'government_job',
+                                   'business_owner', 'unemployed', 'private_job'],
+                          Field(..., description='occupation')]
 
 class Patient(BaseModel):
     id:Annotated[str,Field(...,description='ID of the patient',examples=['P001'])]
@@ -129,3 +144,36 @@ def delete_patient(patient_id:str):
     save_data(data)
     
     return JSONResponse(status_code=200, content={'message':'patient deleted'})
+
+@app.post('/predict')
+def predict_premium(data: UserInput):
+    bmi = data.weight / (data.height ** 2)
+
+    if data.age < 25:      age_group = "young"
+    elif data.age < 45:    age_group = "adult"
+    elif data.age < 60:    age_group = "middle_aged"
+    else:                  age_group = "senior"
+
+    if data.smoker and bmi > 30:    lifestyle_risk = "high"
+    elif data.smoker or bmi > 27:   lifestyle_risk = "medium"
+    else:                           lifestyle_risk = "low"
+
+    tier_1_cities = ["Mumbai", "Delhi", "Bangalore", "Chennai", "Kolkata", "Hyderabad", "Pune"]
+    tier_2_cities = ["Jaipur", "Chandigarh", "Indore", "Lucknow", "Patna", "Ranchi", "Bhopal",
+                     "Nagpur", "Surat", "Rajkot", "Mysore", "Guwahati", "Kota", "Noida", "Coimbatore"]
+    if data.city in tier_1_cities:   city_tier = 1
+    elif data.city in tier_2_cities: city_tier = 2
+    else:                            city_tier = 3
+
+    input_df = pd.DataFrame([{
+        'age_group': age_group,
+        'lifestyle_risk': lifestyle_risk,
+        'city_tier': city_tier,
+        'bmi': bmi,
+        'income_lpa': data.income_lpa,
+        'occupation': data.occupation
+    }])
+
+    prediction = model.predict(input_df)[0]
+
+    return {'predicted_category': prediction}
